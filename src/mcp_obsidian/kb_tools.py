@@ -66,6 +66,12 @@ class FetchUrlToolHandler(ToolHandler):
             "date": result.date,
             "source_url": result.source_url,
             "is_pdf": result.is_pdf,
+            "word_count": result.word_count,
+            "size_category": result.size_category,
+            "sections": [
+                {"heading": s.heading, "word_count": s.word_count}
+                for s in result.sections
+            ],
         }
         if result.warning:
             output["warning"] = result.warning

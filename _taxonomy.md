@@ -118,22 +118,24 @@ Starting domains and example topics. This is a guide, not a restriction. New fol
 - Prefer active voice over passive
 
 ### Writing depth and substance
-- Every note must have real substance — write as much as needed to fully cover the topic, but not a word more
-- A note should have a lead paragraph explaining the concept, a body developing the idea with details, and examples or practical applications where relevant
-- When describing a concept, explain the WHY, not just the WHAT. "X is a pattern" is useless. "X solves the problem of Y by doing Z, which matters because W" is useful
-- Use structure: break content into logical sections with headings. A wall of text is hard to navigate
-- Include specifics: numbers, names, versions, dates, code snippets, command examples — whatever makes the note concrete rather than abstract
-- If the source provides a list of points, don't just copy them — explain each one. "Advantages: speed, reliability" is worthless. Explain WHY it's fast, HOW it's reliable
-- Compare and contrast when relevant: "Unlike X, this approach does Y because Z"
-- When a concept has multiple perspectives or schools of thought, present them
-- Don't pad notes with filler like "this is an important topic" or "many people think" — go straight to the substance
-- Imagine the reader is a smart person encountering this concept for the first time. They need enough depth to actually understand and apply it, not just recognize the term
+- IMPORTANT: Write detailed, thorough notes. Err on the side of writing MORE, not less. A long, rich note is always better than a short summary. Do NOT compress or summarize — develop ideas fully
+- Every note must have real substance: a lead paragraph explaining the concept, a body developing the idea in depth with details and nuance, examples, practical applications, and context
+- When describing a concept, explain the WHY, not just the WHAT. "X is a pattern" is useless. "X solves the problem of Y by doing Z, which matters because W" is useful. Then give a concrete example of how it works in practice
+- Use structure: break content into logical sections with headings. Each section should be fleshed out, not just a sentence
+- Include specifics: numbers, names, versions, dates, code snippets, command examples — whatever makes the note concrete rather than abstract. The more concrete details, the better
+- If the source provides a list of points, don't just copy them — explain each one in depth. "Advantages: speed, reliability" is worthless. Explain WHY it's fast, HOW it's reliable, WHEN this matters, and give an example
+- Compare and contrast when relevant: "Unlike X, this approach does Y because Z" — and explain the tradeoffs
+- When a concept has multiple perspectives or schools of thought, present each one with its reasoning
+- Don't pad notes with empty filler like "this is an important topic" or "many people think" — but DO write at length about the actual substance. There is a difference between filler and depth
+- Imagine the reader is a smart person encountering this concept for the first time. They need enough depth to actually understand, reason about, and apply it — not just recognize the term
+- When in doubt, write more. A note that's too detailed can be trimmed later. A note that's too thin is useless for learning
+- Preserve interesting details, anecdotes, and examples from the source — these make notes memorable and useful. Do not discard them for the sake of brevity
 
 ### Processing workflow
 
 When you receive material (URL, PDF, or text), follow this sequence:
 
-1. **Fetch** — `kb_fetch_url` or `kb_extract_pdf` to get raw content
+1. **Fetch** — `kb_fetch_url` or `kb_extract_pdf` to get raw content. Check `word_count` and `size_category` in the response
 2. **Read taxonomy** — `kb_get_taxonomy` + `kb_get_vault_structure` to understand current organization
 3. **Decompose** — identify distinct ideas in the material (see "Idea boundaries" below). One article often contains 3-10 separate concepts
 4. **Find existing** — `kb_find_related_notes` and `kb_search_by_tag` for each idea. If a note on this concept already exists, update it instead of creating a duplicate
@@ -142,6 +144,34 @@ When you receive material (URL, PDF, or text), follow this sequence:
 7. **Cross-link** — ensure new notes link to related existing ones, and vice versa via `obsidian_patch_content`
 
 Do NOT skip steps 2-4. Understanding what already exists prevents duplicates and orphans.
+
+### Large article handling
+
+`kb_fetch_url` returns `size_category` ("small", "medium", "large") and a `sections` array with headings and word counts.
+
+**For "large" articles (10,000+ words) you MUST use a two-phase workflow:**
+
+**Phase 1 — Analysis and plan (show to user before creating anything):**
+- Read through the ENTIRE article, including the end — use the `sections` list to verify you covered every section
+- Produce a numbered list of ideas you plan to extract, with:
+  - Proposed note title
+  - Which section(s) of the article it comes from
+  - Whether a similar note already exists (from `kb_find_related_notes`)
+- Show this plan to the user and wait for confirmation
+
+**Phase 2 — Creation (after user approves):**
+- Create all notes according to the approved plan
+- Do NOT skip ideas from the plan. Every approved item must become a note
+- For each note, go back to the relevant section of the article and write the note from that section — do not rely on your summary from Phase 1
+
+**For "medium" articles (3,000-10,000 words):**
+- Two-phase workflow is recommended but not mandatory
+- At minimum, list the ideas you found before creating notes
+
+**For "small" articles (<3,000 words):**
+- Process normally without a separate planning phase
+
+**Critical rule for all sizes:** Use the `sections` list to verify you processed the entire article. If the last section in the list is not reflected in your notes, you missed the end of the article. Go back and process it.
 
 ### Idea boundaries
 

@@ -38,20 +38,27 @@ class TestFetchUrlToolHandler:
             self.handler.run_tool({})
 
     @patch("mcp_obsidian.kb_tools.fetch_url")
-    def test_returns_content(self, mock_fetch):
-        from mcp_obsidian.fetcher import FetchResult
+    def test_returns_content_with_metadata(self, mock_fetch):
+        from mcp_obsidian.fetcher import FetchResult, ContentSection
         mock_fetch.return_value = FetchResult(
-            content="# Article\n\nSome text",
+            content="# Article\n\nSome text with several words here",
             title="Article",
             author="Author",
             date="2026-01-01",
             source_url="https://example.com",
+            word_count=8,
+            size_category="small",
+            sections=[ContentSection(heading="# Article", word_count=7)],
         )
         result = self.handler.run_tool({"url": "https://example.com"})
         data = json.loads(result[0].text)
         assert data["title"] == "Article"
-        assert data["content"] == "# Article\n\nSome text"
+        assert data["content"] == "# Article\n\nSome text with several words here"
         assert data["source_url"] == "https://example.com"
+        assert data["word_count"] == 8
+        assert data["size_category"] == "small"
+        assert len(data["sections"]) == 1
+        assert data["sections"][0]["heading"] == "# Article"
 
     @patch("mcp_obsidian.kb_tools.fetch_url")
     def test_pdf_detected(self, mock_fetch):
