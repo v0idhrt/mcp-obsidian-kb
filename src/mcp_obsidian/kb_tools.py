@@ -15,7 +15,9 @@ from .vault_utils import (
     append_to_moc,
     build_binary_wrapper,
     aggregate_search_results,
+    parse_note_sections,
 )
+
 
 api_key = os.getenv("OBSIDIAN_API_KEY", "")
 obsidian_host = os.getenv("OBSIDIAN_HOST", "127.0.0.1")
@@ -451,3 +453,424 @@ class ListMocsToolHandler(ToolHandler):
             mocs.append({"path": path, "title": title})
 
         return [TextContent(type="text", text=json.dumps(mocs, ensure_ascii=False, indent=2))]
+
+
+class MoveNoteToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_move_note")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Move one or more notes between folders in the vault. "
+                "Reads each file, writes to the new path, and deletes the original. "
+                "Use kb_get_vault_structure first to verify source and destination folders."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "moves": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_path": {
+                                    "type": "string",
+                                    "description": "Current path to the note in vault",
+                                },
+                                "destination_path": {
+                                    "type": "string",
+                                    "description": "New path for the note in vault",
+                                },
+                            },
+                            "required": ["source_path", "destination_path"],
+                        },
+                        "description": "List of moves, each with source_path and destination_path",
+                    },
+                },
+                "required": ["moves"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        if "moves" not in args:
+            raise RuntimeError("moves argument missing")
+
+        moves = args["moves"]
+        if not moves:
+            raise RuntimeError("moves list is empty")
+
+        api = _get_api()
+        results = []
+
+        for i, move in enumerate(moves):
+            source = move.get("source_path")
+            destination = move.get("destination_path")
+
+            if not source or not destination:
+                results.append({"source": source, "destination": destination, "status": "error", "error": "missing source_path or destination_path"})
+                continue
+
+            if source == destination:
+                results.append({"source": source, "destination": destination, "status": "error", "error": "source and destination are the same"})
+                continue
+
+            try:
+                content = api.get_file_contents(source)
+
+                # Check destination doesn't exist
+                try:
+                    api.get_file_contents(destination)
+                    results.append({"source": source, "destination": destination, "status": "error", "error": "destination already exists"})
+                    continue
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
+
+                api.put_content(destination, content)
+                api.delete_file(source)
+                results.append({"source": source, "destination": destination, "status": "moved"})
+            except Exception as e:
+                results.append({"source": source, "destination": destination, "status": "error", "error": str(e)})
+
+        return [TextContent(type="text", text=json.dumps(results, ensure_ascii=False, indent=2))]
+
+
+class GetNoteSectionsToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_get_note_sections")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Parse a note into sections by headings. Returns frontmatter, preamble, "
+                "and each heading section with its content. Use this to understand note "
+                "structure before editing a specific section with obsidian_patch_content."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the note in vault (e.g. 'Программирование/Python/Генераторы.md')",
+                        "format": "path",
+                    },
+                },
+                "required": ["filepath"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        if "filepath" not in args:
+            raise RuntimeError("filepath argument missing")
+
+        api = _get_api()
+        content = api.get_file_contents(args["filepath"])
+        sections = parse_note_sections(content)
+
+        return [TextContent(type="text", text=json.dumps(sections, ensure_ascii=False, indent=2))]
+
+
+class GetBacklinksToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_get_backlinks")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Find all notes that link to a given note via [[wikilinks]]. "
+                "Use before moving, renaming, or deleting a note to understand its connections."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the note in vault (e.g. 'AI/Трансформеры.md')",
+                        "format": "path",
+                    },
+                },
+                "required": ["filepath"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        if "filepath" not in args:
+            raise RuntimeError("filepath argument missing")
+
+        filepath = args["filepath"]
+        note_name = filepath.rsplit("/", 1)[-1].removesuffix(".md")
+
+        api = _get_api()
+        results = api.search(f"[[{note_name}]]", context_length=100)
+
+        backlinks = []
+        for item in results:
+            source = item.get("filename", "")
+            if source == filepath:
+                continue
+            backlinks.append({
+                "path": source,
+                "title": source.rsplit("/", 1)[-1].removesuffix(".md"),
+                "context": item.get("matches", [{}])[0].get("context", "") if item.get("matches") else "",
+            })
+
+        return [TextContent(type="text", text=json.dumps(backlinks, ensure_ascii=False, indent=2))]
+
+
+class SaveNotesBatchToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_save_notes_batch")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Create multiple atomic Zettelkasten notes in one call. "
+                "Use when decomposing an article into several ideas. "
+                "Each note gets full frontmatter. Errors on individual notes don't block others."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "filepath": {"type": "string", "description": "Target path in vault"},
+                                "title": {"type": "string"},
+                                "content": {"type": "string", "description": "Markdown body"},
+                                "tags": {"type": "array", "items": {"type": "string"}},
+                                "related": {"type": "array", "items": {"type": "string"}},
+                                "source": {"type": "string"},
+                                "source_type": {"type": "string", "enum": ["url", "pdf", "manual"]},
+                                "aliases": {"type": "array", "items": {"type": "string"}},
+                                "moc": {"type": "string"},
+                            },
+                            "required": ["filepath", "title", "content", "tags"],
+                        },
+                        "description": "Array of notes to create",
+                    },
+                },
+                "required": ["notes"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        if "notes" not in args:
+            raise RuntimeError("notes argument missing")
+
+        notes = args["notes"]
+        if not notes:
+            raise RuntimeError("notes list is empty")
+
+        api = _get_api()
+        results = []
+
+        for note in notes:
+            filepath = note.get("filepath", "")
+            try:
+                # Check if file already exists
+                try:
+                    api.get_file_contents(filepath)
+                    results.append({"filepath": filepath, "status": "error", "error": "file already exists"})
+                    continue
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
+
+                note_content = build_atomic_note(
+                    title=note["title"],
+                    content=note["content"],
+                    tags=note["tags"],
+                    aliases=note.get("aliases"),
+                    source=note.get("source"),
+                    source_type=note.get("source_type"),
+                    related=note.get("related"),
+                    moc=note.get("moc"),
+                )
+                api.put_content(filepath, note_content)
+                results.append({"filepath": filepath, "status": "created"})
+            except Exception as e:
+                results.append({"filepath": filepath, "status": "error", "error": str(e)})
+
+        return [TextContent(type="text", text=json.dumps(results, ensure_ascii=False, indent=2))]
+
+
+class SearchByTagToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_search_by_tag")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Find notes with a specific tag using Dataview DQL. "
+                "Supports hierarchical tags (e.g. 'программирование/python'). "
+                "Requires Dataview plugin in Obsidian."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tag": {
+                        "type": "string",
+                        "description": "Tag to search for, without # (e.g. 'ai/llm', 'концепция')",
+                    },
+                },
+                "required": ["tag"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        if "tag" not in args:
+            raise RuntimeError("tag argument missing")
+
+        tag = args["tag"]
+        api = _get_api()
+        results = api.search_dql(f'LIST FROM #{tag}')
+
+        notes = []
+        for item in results:
+            path = item.get("filename", "")
+            notes.append({
+                "path": path,
+                "title": path.rsplit("/", 1)[-1].removesuffix(".md"),
+            })
+
+        return [TextContent(type="text", text=json.dumps(notes, ensure_ascii=False, indent=2))]
+
+
+class MergeNotesToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_merge_notes")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Merge two duplicate notes into one. Content from source is appended to target "
+                "under a separator. Source note is deleted after merge. "
+                "Use kb_get_note_sections on both notes first to review their structure."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_path": {
+                        "type": "string",
+                        "description": "Note to merge FROM (will be deleted)",
+                        "format": "path",
+                    },
+                    "target_path": {
+                        "type": "string",
+                        "description": "Note to merge INTO (will be kept and extended)",
+                        "format": "path",
+                    },
+                },
+                "required": ["source_path", "target_path"],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        for field in ["source_path", "target_path"]:
+            if field not in args:
+                raise RuntimeError(f"{field} argument missing")
+
+        source = args["source_path"]
+        target = args["target_path"]
+
+        if source == target:
+            raise RuntimeError("source and target are the same note")
+
+        api = _get_api()
+        source_content = api.get_file_contents(source)
+        target_content = api.get_file_contents(target)
+
+        # Extract source body (skip frontmatter)
+        source_sections = parse_note_sections(source_content)
+        source_body_parts = []
+        for section in source_sections:
+            if section["heading"] == "frontmatter":
+                continue
+            if section["heading"] in ("preamble",):
+                source_body_parts.append(section["content"])
+            else:
+                source_body_parts.append(section["heading"] + "\n" + section["content"])
+
+        source_body = "\n\n".join(part for part in source_body_parts if part)
+        source_name = source.rsplit("/", 1)[-1].removesuffix(".md")
+
+        merged = target_content.rstrip("\n") + f"\n\n---\n\n> [!note] Объединено из [[{source_name}]]\n\n" + source_body + "\n"
+
+        api.put_content(target, merged)
+        api.delete_file(source)
+
+        return [TextContent(type="text", text=f"Merged '{source}' into '{target}'")]
+
+
+class GetOrphansToolHandler(ToolHandler):
+    def __init__(self):
+        super().__init__("kb_get_orphans")
+
+    def get_tool_description(self):
+        return Tool(
+            name=self.name,
+            description=(
+                "Find notes with no incoming links (no other note links to them). "
+                "Useful for vault maintenance — orphan notes may need linking or cleanup. "
+                "Checks .md files only, skips MOCs and _taxonomy.md."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "folder": {
+                        "type": "string",
+                        "description": "Folder to scan (e.g. 'Программирование'). Empty for entire vault.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max notes to check (default: 50, to avoid timeout)",
+                        "default": 50,
+                    },
+                },
+                "required": [],
+            },
+        )
+
+    def run_tool(self, args: dict) -> Sequence[TextContent | ImageContent | EmbeddedResource]:
+        api = _get_api()
+        folder = args.get("folder")
+        limit = args.get("limit", 50)
+
+        if folder:
+            files = api.list_files_in_dir(folder)
+        else:
+            files = api.list_files_in_vault()
+
+        md_files = [f for f in files if f.endswith(".md") and not f.endswith("_taxonomy.md")]
+        md_files = md_files[:limit]
+
+        orphans = []
+        for filepath in md_files:
+            note_name = filepath.rsplit("/", 1)[-1].removesuffix(".md")
+            if note_name.startswith("MOC "):
+                continue
+
+            try:
+                results = api.search(f"[[{note_name}]]", context_length=10)
+                # Filter out self-references
+                backlinks = [r for r in results if r.get("filename") != filepath]
+                if not backlinks:
+                    orphans.append({
+                        "path": filepath,
+                        "title": note_name,
+                    })
+            except Exception:
+                continue
+
+        return [TextContent(type="text", text=json.dumps(orphans, ensure_ascii=False, indent=2))]

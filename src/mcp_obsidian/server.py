@@ -65,6 +65,13 @@ add_tool_handler(kb_tools.SaveAtomicNoteToolHandler())
 add_tool_handler(kb_tools.UpdateMocToolHandler())
 add_tool_handler(kb_tools.SaveBinaryToolHandler())
 add_tool_handler(kb_tools.ListMocsToolHandler())
+add_tool_handler(kb_tools.MoveNoteToolHandler())
+add_tool_handler(kb_tools.GetNoteSectionsToolHandler())
+add_tool_handler(kb_tools.GetBacklinksToolHandler())
+add_tool_handler(kb_tools.SaveNotesBatchToolHandler())
+add_tool_handler(kb_tools.SearchByTagToolHandler())
+add_tool_handler(kb_tools.MergeNotesToolHandler())
+add_tool_handler(kb_tools.GetOrphansToolHandler())
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:

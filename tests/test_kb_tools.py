@@ -11,6 +11,13 @@ from mcp_obsidian.kb_tools import (
     UpdateMocToolHandler,
     SaveBinaryToolHandler,
     ListMocsToolHandler,
+    MoveNoteToolHandler,
+    GetNoteSectionsToolHandler,
+    GetBacklinksToolHandler,
+    SaveNotesBatchToolHandler,
+    SearchByTagToolHandler,
+    MergeNotesToolHandler,
+    GetOrphansToolHandler,
 )
 
 
@@ -302,3 +309,401 @@ class TestListMocsToolHandler:
         data = json.loads(result[0].text)
         assert len(data) == 2
         assert data[0]["path"] == "MOC Programming.md"
+
+
+class TestMoveNoteToolHandler:
+    def setup_method(self):
+        self.handler = MoveNoteToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_move_note"
+
+    def test_tool_description_exists(self):
+        desc = self.handler.get_tool_description()
+        assert desc.name == "kb_move_note"
+        assert "moves" in desc.inputSchema["properties"]
+
+    def test_missing_moves_raises(self):
+        with pytest.raises(RuntimeError, match="moves"):
+            self.handler.run_tool({})
+
+    def test_empty_moves_raises(self):
+        with pytest.raises(RuntimeError, match="empty"):
+            self.handler.run_tool({"moves": []})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_single_move(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "# Note content",  # reading source
+            Exception("404"),  # checking destination doesn't exist
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"moves": [
+            {"source_path": "Inbox/Заметка.md", "destination_path": "Программирование/Заметка.md"},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 1
+        assert data[0]["status"] == "moved"
+        mock_api.put_content.assert_called_once_with("Программирование/Заметка.md", "# Note content")
+        mock_api.delete_file.assert_called_once_with("Inbox/Заметка.md")
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_multiple_moves(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "content A", Exception("404"),  # first move
+            "content B", Exception("404"),  # second move
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"moves": [
+            {"source_path": "Inbox/A.md", "destination_path": "Docs/A.md"},
+            {"source_path": "Inbox/B.md", "destination_path": "Docs/B.md"},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 2
+        assert data[0]["status"] == "moved"
+        assert data[1]["status"] == "moved"
+        assert mock_api.put_content.call_count == 2
+        assert mock_api.delete_file.call_count == 2
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_destination_exists_reports_error(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "# Source",        # reading source
+            "# Already here",  # destination exists
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"moves": [
+            {"source_path": "A/note.md", "destination_path": "B/note.md"},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert data[0]["status"] == "error"
+        assert "already exists" in data[0]["error"]
+        mock_api.put_content.assert_not_called()
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_same_path_reports_error(self, mock_get_api):
+        mock_get_api.return_value = MagicMock()
+
+        result = self.handler.run_tool({"moves": [
+            {"source_path": "A/note.md", "destination_path": "A/note.md"},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert data[0]["status"] == "error"
+        assert "same" in data[0]["error"]
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_partial_failure(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "content A", Exception("404"),  # first move ok
+            Exception("source not found"),   # second move fails on read
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"moves": [
+            {"source_path": "Inbox/A.md", "destination_path": "Docs/A.md"},
+            {"source_path": "Inbox/gone.md", "destination_path": "Docs/gone.md"},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert data[0]["status"] == "moved"
+        assert data[1]["status"] == "error"
+
+
+class TestGetNoteSectionsToolHandler:
+    def setup_method(self):
+        self.handler = GetNoteSectionsToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_get_note_sections"
+
+    def test_tool_description_exists(self):
+        desc = self.handler.get_tool_description()
+        assert desc.name == "kb_get_note_sections"
+        assert "filepath" in desc.inputSchema["properties"]
+
+    def test_missing_filepath_raises(self):
+        with pytest.raises(RuntimeError, match="filepath"):
+            self.handler.run_tool({})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_parses_sections(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.return_value = (
+            "---\ntitle: Test\ntags: [test]\n---\n\n# Title\n\nIntro text\n\n## Section A\n\nContent A\n\n## Section B\n\nContent B\n"
+        )
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"filepath": "test.md"})
+        data = json.loads(result[0].text)
+
+        headings = [s["heading"] for s in data]
+        assert "frontmatter" in headings
+        assert "# Title" in headings
+        assert "## Section A" in headings
+        assert "## Section B" in headings
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_frontmatter_content(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.return_value = "---\ntitle: Hello\n---\n\nBody text\n"
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"filepath": "note.md"})
+        data = json.loads(result[0].text)
+
+        fm = [s for s in data if s["heading"] == "frontmatter"][0]
+        assert "title: Hello" in fm["content"]
+        assert fm["level"] == 0
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_no_frontmatter(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.return_value = "# Just a heading\n\nSome text\n"
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"filepath": "note.md"})
+        data = json.loads(result[0].text)
+
+        assert data[0]["heading"] == "# Just a heading"
+        assert data[0]["level"] == 1
+
+
+class TestGetBacklinksToolHandler:
+    def setup_method(self):
+        self.handler = GetBacklinksToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_get_backlinks"
+
+    def test_missing_filepath_raises(self):
+        with pytest.raises(RuntimeError, match="filepath"):
+            self.handler.run_tool({})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_returns_backlinks_excluding_self(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.search.return_value = [
+            {"filename": "AI/Трансформеры.md", "matches": [{"context": "self ref"}]},
+            {"filename": "AI/Attention.md", "matches": [{"context": "see [[Трансформеры]]"}]},
+            {"filename": "AI/MOC AI.md", "matches": [{"context": "- [[Трансформеры]]"}]},
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"filepath": "AI/Трансформеры.md"})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 2
+        paths = [d["path"] for d in data]
+        assert "AI/Трансформеры.md" not in paths
+        assert "AI/Attention.md" in paths
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_no_backlinks(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.search.return_value = []
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"filepath": "Orphan/note.md"})
+        data = json.loads(result[0].text)
+        assert data == []
+
+
+class TestSaveNotesBatchToolHandler:
+    def setup_method(self):
+        self.handler = SaveNotesBatchToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_save_notes_batch"
+
+    def test_missing_notes_raises(self):
+        with pytest.raises(RuntimeError, match="notes"):
+            self.handler.run_tool({})
+
+    def test_empty_notes_raises(self):
+        with pytest.raises(RuntimeError, match="empty"):
+            self.handler.run_tool({"notes": []})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_creates_multiple_notes(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = Exception("404")
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"notes": [
+            {"filepath": "AI/Note1.md", "title": "Note 1", "content": "Body 1", "tags": ["ai"]},
+            {"filepath": "AI/Note2.md", "title": "Note 2", "content": "Body 2", "tags": ["ai"]},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 2
+        assert data[0]["status"] == "created"
+        assert data[1]["status"] == "created"
+        assert mock_api.put_content.call_count == 2
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_existing_file_reports_error(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "existing content",  # first note exists
+            Exception("404"),    # second doesn't
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"notes": [
+            {"filepath": "AI/Exists.md", "title": "Exists", "content": "Body", "tags": ["ai"]},
+            {"filepath": "AI/New.md", "title": "New", "content": "Body", "tags": ["ai"]},
+        ]})
+        data = json.loads(result[0].text)
+
+        assert data[0]["status"] == "error"
+        assert "already exists" in data[0]["error"]
+        assert data[1]["status"] == "created"
+
+
+class TestSearchByTagToolHandler:
+    def setup_method(self):
+        self.handler = SearchByTagToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_search_by_tag"
+
+    def test_missing_tag_raises(self):
+        with pytest.raises(RuntimeError, match="tag"):
+            self.handler.run_tool({})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_returns_notes(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.search_dql.return_value = [
+            {"filename": "AI/Трансформеры.md"},
+            {"filename": "AI/GPT.md"},
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"tag": "ai/llm"})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 2
+        assert data[0]["path"] == "AI/Трансформеры.md"
+        mock_api.search_dql.assert_called_once_with("LIST FROM #ai/llm")
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_empty_results(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.search_dql.return_value = []
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"tag": "несуществующий"})
+        data = json.loads(result[0].text)
+        assert data == []
+
+
+class TestMergeNotesToolHandler:
+    def setup_method(self):
+        self.handler = MergeNotesToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_merge_notes"
+
+    def test_missing_fields_raises(self):
+        with pytest.raises(RuntimeError, match="source_path"):
+            self.handler.run_tool({"target_path": "b.md"})
+        with pytest.raises(RuntimeError, match="target_path"):
+            self.handler.run_tool({"source_path": "a.md"})
+
+    def test_same_note_raises(self):
+        with pytest.raises(RuntimeError, match="same"):
+            self.handler.run_tool({"source_path": "a.md", "target_path": "a.md"})
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_merges_notes(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.get_file_contents.side_effect = [
+            "---\ntitle: Source\ntags: [ai]\n---\n\n# Source\n\nSource body\n",  # source
+            "---\ntitle: Target\ntags: [ai]\n---\n\n# Target\n\nTarget body\n",  # target
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({
+            "source_path": "AI/Дубликат.md",
+            "target_path": "AI/Оригинал.md",
+        })
+
+        assert "Merged" in result[0].text
+        # Check target was updated with merged content
+        written_content = mock_api.put_content.call_args[0][1]
+        assert "Target body" in written_content
+        assert "Source body" in written_content
+        assert "Объединено из" in written_content
+        # Source was deleted
+        mock_api.delete_file.assert_called_once_with("AI/Дубликат.md")
+
+
+class TestGetOrphansToolHandler:
+    def setup_method(self):
+        self.handler = GetOrphansToolHandler()
+
+    def test_tool_name(self):
+        assert self.handler.name == "kb_get_orphans"
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_finds_orphans(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.list_files_in_vault.return_value = [
+            "AI/Connected.md",
+            "AI/Orphan.md",
+            "AI/MOC AI.md",
+        ]
+        mock_api.search.side_effect = [
+            [{"filename": "AI/MOC AI.md"}],  # Connected has a backlink
+            [],                                # Orphan has none
+        ]
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({})
+        data = json.loads(result[0].text)
+
+        assert len(data) == 1
+        assert data[0]["path"] == "AI/Orphan.md"
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_skips_mocs_and_taxonomy(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.list_files_in_vault.return_value = [
+            "AI/MOC AI.md",
+            "_taxonomy.md",
+            "AI/Note.md",
+        ]
+        mock_api.search.return_value = []
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({})
+        data = json.loads(result[0].text)
+
+        # Only Note.md checked, MOC and taxonomy skipped
+        assert len(data) == 1
+        assert data[0]["title"] == "Note"
+
+    @patch("mcp_obsidian.kb_tools._get_api")
+    def test_folder_filter(self, mock_get_api):
+        mock_api = MagicMock()
+        mock_api.list_files_in_dir.return_value = ["Inbox/note.md"]
+        mock_api.search.return_value = []
+        mock_get_api.return_value = mock_api
+
+        result = self.handler.run_tool({"folder": "Inbox"})
+        data = json.loads(result[0].text)
+
+        mock_api.list_files_in_dir.assert_called_once_with("Inbox")
+        assert len(data) == 1

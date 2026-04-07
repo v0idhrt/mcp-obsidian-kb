@@ -8,6 +8,7 @@ from mcp_obsidian.vault_utils import (
     append_to_moc,
     build_binary_wrapper,
     aggregate_search_results,
+    parse_note_sections,
 )
 
 class TestBuildVaultTree:
@@ -168,3 +169,54 @@ class TestAggregateSearchResults:
 
     def test_empty_input(self):
         assert aggregate_search_results([], limit=10) == []
+
+
+class TestParseNoteSections:
+    def test_full_note(self):
+        content = "---\ntitle: Test\ntags: [a]\n---\n\n# Heading 1\n\nIntro\n\n## Sub A\n\nContent A\n\n## Sub B\n\nContent B\n"
+        sections = parse_note_sections(content)
+
+        assert sections[0]["heading"] == "frontmatter"
+        assert sections[0]["level"] == 0
+        assert "title: Test" in sections[0]["content"]
+
+        assert sections[1]["heading"] == "# Heading 1"
+        assert sections[1]["level"] == 1
+        assert "Intro" in sections[1]["content"]
+
+        assert sections[2]["heading"] == "## Sub A"
+        assert sections[2]["level"] == 2
+        assert "Content A" in sections[2]["content"]
+
+        assert sections[3]["heading"] == "## Sub B"
+        assert "Content B" in sections[3]["content"]
+
+    def test_no_frontmatter(self):
+        content = "# Title\n\nBody here\n"
+        sections = parse_note_sections(content)
+        assert sections[0]["heading"] == "# Title"
+        assert "Body here" in sections[0]["content"]
+
+    def test_only_frontmatter(self):
+        content = "---\ntitle: Empty\n---\n"
+        sections = parse_note_sections(content)
+        assert len(sections) == 1
+        assert sections[0]["heading"] == "frontmatter"
+
+    def test_preamble_before_heading(self):
+        content = "Some text before any heading\n\n# First\n\nAfter heading\n"
+        sections = parse_note_sections(content)
+        assert sections[0]["heading"] == "preamble"
+        assert "Some text before any heading" in sections[0]["content"]
+        assert sections[1]["heading"] == "# First"
+
+    def test_empty_content(self):
+        sections = parse_note_sections("")
+        assert sections == []
+
+    def test_cyrillic_headings(self):
+        content = "# Заголовок\n\nТекст\n\n## Подраздел\n\nЕщё текст\n"
+        sections = parse_note_sections(content)
+        assert sections[0]["heading"] == "# Заголовок"
+        assert sections[1]["heading"] == "## Подраздел"
+        assert "Ещё текст" in sections[1]["content"]

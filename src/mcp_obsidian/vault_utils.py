@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 
@@ -175,3 +176,54 @@ def aggregate_search_results(
         }
         for path, score in ranked
     ]
+
+
+def parse_note_sections(content: str) -> list[dict]:
+    """Parse a markdown note into sections by headings.
+
+    Returns a list of dicts with keys:
+      - heading: str (e.g. "## Introduction") or "frontmatter" or "preamble"
+      - level: int (0 for frontmatter/preamble, 1-6 for headings)
+      - content: str (section body without the heading line itself)
+    """
+    sections: list[dict] = []
+    lines = content.split("\n")
+    i = 0
+
+    # Handle frontmatter
+    if lines and lines[0].strip() == "---":
+        end = -1
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                end = j
+                break
+        if end > 0:
+            fm_body = "\n".join(lines[1:end])
+            sections.append({"heading": "frontmatter", "level": 0, "content": fm_body})
+            i = end + 1
+
+    heading_re = re.compile(r"^(#{1,6})\s+(.+)$")
+    current_heading = "preamble"
+    current_level = 0
+    current_lines: list[str] = []
+
+    while i < len(lines):
+        m = heading_re.match(lines[i])
+        if m:
+            # Flush previous section
+            body = "\n".join(current_lines).strip()
+            if body or current_heading != "preamble":
+                sections.append({"heading": current_heading, "level": current_level, "content": body})
+            current_heading = lines[i]
+            current_level = len(m.group(1))
+            current_lines = []
+        else:
+            current_lines.append(lines[i])
+        i += 1
+
+    # Flush last section
+    body = "\n".join(current_lines).strip()
+    if body or current_heading != "preamble":
+        sections.append({"heading": current_heading, "level": current_level, "content": body})
+
+    return sections

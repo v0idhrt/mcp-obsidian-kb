@@ -1,7 +1,7 @@
 [project]
-name = "mcp-obsidian"
-version = "0.2.1"
-description = "MCP server to work with Obsidian via the remote REST plugin"
+name = "mcp-obsidian-kb"
+version = "0.3.0"
+description = "MCP server for Obsidian with Zettelkasten knowledge base toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

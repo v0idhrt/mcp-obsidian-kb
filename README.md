@@ -1,89 +1,94 @@
-# MCP server for Obsidian
+# mcp-obsidian-kb
 
-MCP server to interact with Obsidian via the Local REST API community plugin.
+MCP server for Obsidian with a Zettelkasten knowledge base toolkit. Connects to Obsidian via the Local REST API plugin and provides 29 tools for automated note creation, decomposition, linking, and vault maintenance.
 
 <a href="https://glama.ai/mcp/servers/3wko1bhuek"><img width="380" height="200" src="https://glama.ai/mcp/servers/3wko1bhuek/badge" alt="server for Obsidian MCP server" /></a>
 
-## Components
+## Tools
 
-### Tools
+### Core Obsidian tools
 
-The server implements multiple tools to interact with Obsidian:
+| Tool | Description |
+|------|-------------|
+| `obsidian_list_files_in_vault` | List all files and directories in the vault root |
+| `obsidian_list_files_in_dir` | List files in a specific directory |
+| `obsidian_get_file_contents` | Read content of a single file |
+| `obsidian_get_batch_file_contents` | Read multiple files at once |
+| `obsidian_put_content` | Create or overwrite a file |
+| `obsidian_append_content` | Append content to a file |
+| `obsidian_patch_content` | Edit a specific section by heading, block reference, or frontmatter key |
+| `obsidian_delete_file` | Delete a file or directory |
+| `obsidian_simple_search` | Full-text search across the vault |
+| `obsidian_complex_search` | Search using JsonLogic queries |
+| `obsidian_get_periodic_note` | Get current daily/weekly/monthly note |
+| `obsidian_recent_periodic_notes` | Get recent periodic notes |
+| `obsidian_recent_changes` | Get recently modified files (requires Dataview plugin) |
 
-- list_files_in_vault: Lists all files and directories in the root directory of your Obsidian vault
-- list_files_in_dir: Lists all files and directories in a specific Obsidian directory
-- get_file_contents: Return the content of a single file in your vault.
-- search: Search for documents matching a specified text query across all files in the vault
-- patch_content: Insert content into an existing note relative to a heading, block reference, or frontmatter field.
-- append_content: Append content to a new or existing file in the vault.
-- delete_file: Delete a file or directory from your vault.
+### Knowledge base tools
 
-### Example prompts
+Tools for Zettelkasten-style knowledge management with automated decomposition, linking, and maintenance.
 
-Its good to first instruct Claude to use Obsidian. Then it will always call the tool.
+| Tool | Description |
+|------|-------------|
+| `kb_fetch_url` | Fetch and clean a web page, extract text/metadata |
+| `kb_extract_pdf` | Extract text from a PDF file in the vault |
+| `kb_get_vault_structure` | Get folder tree with file counts |
+| `kb_get_taxonomy` | Read the `_taxonomy.md` control file with organization rules |
+| `kb_find_related_notes` | Search for related notes by keywords, ranked by relevance |
+| `kb_save_atomic_note` | Create a single atomic note with frontmatter |
+| `kb_save_notes_batch` | Create multiple atomic notes in one call (for article decomposition) |
+| `kb_update_moc` | Add entries to a Map of Content, creates MOC if needed |
+| `kb_list_mocs` | List all MOC notes in the vault |
+| `kb_save_binary` | Save a binary file with a wrapper note |
+| `kb_move_note` | Move one or more notes between folders |
+| `kb_get_note_sections` | Parse a note into sections by headings |
+| `kb_get_backlinks` | Find all notes linking to a given note |
+| `kb_search_by_tag` | Find notes by tag via Dataview DQL |
+| `kb_merge_notes` | Merge two duplicate notes into one |
+| `kb_get_orphans` | Find notes with no incoming links |
 
-The use prompts like this:
-- Get the contents of the last architecture call note and summarize them
-- Search for all files where Azure CosmosDb is mentioned and quickly explain to me the context in which it is mentioned
-- Summarize the last meeting notes and put them into a new note 'summary meeting.md'. Add an introduction so that I can send it via email.
+### Taxonomy
+
+The `_taxonomy.md` file controls how the knowledge base is organized: folder structure, tagging conventions, note style, decomposition rules, and maintenance procedures. Place it at the vault root. The model reads it via `kb_get_taxonomy` before creating or organizing notes.
+
+## Example prompts
+
+First instruct Claude to use Obsidian, then it will call the tools automatically.
+
+- "Read this article and create notes in my vault: https://example.com/article"
+- "Find all notes about transformers and check if any are orphaned"
+- "Move all notes from Inbox/ to their proper folders based on the taxonomy"
+- "Merge these two duplicate notes about gradient descent"
+- "Search for all notes tagged ai/llm and update the AI MOC"
+- "Get the contents of the last architecture call note and summarize them"
 
 ## Configuration
 
-### Obsidian REST API Key
+### Prerequisites
 
-There are two ways to configure the environment with the Obsidian REST API Key. 
+1. Install the [Obsidian Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) community plugin in Obsidian
+2. Enable it and copy the API key from plugin settings
+3. (Optional) Install the [Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin for `kb_search_by_tag` and `obsidian_recent_changes`
 
-1. Add to server config (preferred)
+### Environment variables
 
-```json
-{
-  "mcp-obsidian": {
-    "command": "uvx",
-    "args": [
-      "mcp-obsidian"
-    ],
-    "env": {
-      "OBSIDIAN_API_KEY": "<your_api_key_here>",
-      "OBSIDIAN_HOST": "<your_obsidian_host>",
-      "OBSIDIAN_PORT": "<your_obsidian_port>"
-    }
-  }
-}
-```
-Sometimes Claude has issues detecting the location of uv / uvx. You can use `which uvx` to find and paste the full path in above config in such cases.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OBSIDIAN_API_KEY` | (required) | API key from the Local REST API plugin |
+| `OBSIDIAN_HOST` | `127.0.0.1` | Obsidian REST API host |
+| `OBSIDIAN_PORT` | `27124` | Obsidian REST API port |
+| `OBSIDIAN_PROTOCOL` | `https` | Protocol (`http` or `https`) |
 
-2. Create a `.env` file in the working directory with the following required variables:
+### Claude Desktop
 
-```
-OBSIDIAN_API_KEY=your_api_key_here
-OBSIDIAN_HOST=your_obsidian_host
-OBSIDIAN_PORT=your_obsidian_port
-```
-
-Note:
-- You can find the API key in the Obsidian plugin config
-- Default port is 27124 if not specified
-- Default host is 127.0.0.1 if not specified
-
-## Quickstart
-
-### Install
-
-#### Obsidian REST API
-
-You need the Obsidian REST API community plugin running: https://github.com/coddingtonbear/obsidian-local-rest-api
-
-Install and enable it in the settings and copy the api key.
-
-#### Claude Desktop
-
-On MacOS: `~/Library/Application\ Support/Claude/claude_desktop_config.json`
-
-On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
+Config file locations:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 <details>
-  <summary>Development/Unpublished Servers Configuration</summary>
-  
+  <summary>Development (local clone)</summary>
+
 ```json
 {
   "mcpServers": {
@@ -91,14 +96,12 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
       "command": "uv",
       "args": [
         "--directory",
-        "<dir_to>/mcp-obsidian",
+        "/path/to/mcp-obsidian",
         "run",
         "mcp-obsidian"
       ],
       "env": {
-        "OBSIDIAN_API_KEY": "<your_api_key_here>",
-        "OBSIDIAN_HOST": "<your_obsidian_host>",
-        "OBSIDIAN_PORT": "<your_obsidian_port>"
+        "OBSIDIAN_API_KEY": "<your_api_key>"
       }
     }
   }
@@ -107,8 +110,8 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 </details>
 
 <details>
-  <summary>Published Servers Configuration</summary>
-  
+  <summary>Published (via uvx)</summary>
+
 ```json
 {
   "mcpServers": {
@@ -118,9 +121,7 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
         "mcp-obsidian"
       ],
       "env": {
-        "OBSIDIAN_API_KEY": "<YOUR_OBSIDIAN_API_KEY>",
-        "OBSIDIAN_HOST": "<your_obsidian_host>",
-        "OBSIDIAN_PORT": "<your_obsidian_port>"
+        "OBSIDIAN_API_KEY": "<your_api_key>"
       }
     }
   }
@@ -128,32 +129,31 @@ On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
 ```
 </details>
 
+If Claude can't find `uv`/`uvx`, use the full path from `which uvx`.
+
 ## Development
 
-### Building
+### Setup
 
-To prepare the package for distribution:
-
-1. Sync dependencies and update lockfile:
 ```bash
 uv sync
 ```
 
+### Running tests
+
+```bash
+OBSIDIAN_API_KEY=test uv run pytest tests/ -v
+```
+
 ### Debugging
 
-Since MCP servers run over stdio, debugging can be challenging. For the best debugging
-experience, we strongly recommend using the [MCP Inspector](https://github.com/modelcontextprotocol/inspector).
-
-You can launch the MCP Inspector via [`npm`](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) with this command:
+MCP servers communicate over stdio. Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) for debugging:
 
 ```bash
 npx @modelcontextprotocol/inspector uv --directory /path/to/mcp-obsidian run mcp-obsidian
 ```
 
-Upon launching, the Inspector will display a URL that you can access in your browser to begin debugging.
-
-You can also watch the server logs with this command:
-
+Server logs (macOS):
 ```bash
 tail -n 20 -f ~/Library/Logs/Claude/mcp-server-mcp-obsidian.log
 ```

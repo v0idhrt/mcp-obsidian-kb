@@ -268,6 +268,33 @@ class Obsidian():
 
         return self._safe_call(call_fn)
     
+    def search_dql(self, query: str) -> Any:
+        """Execute a Dataview DQL query. Requires Dataview plugin in Obsidian.
+
+        Args:
+            query: DQL query string (e.g. 'LIST FROM #tag')
+
+        Returns:
+            Query results as JSON
+        """
+        url = f"{self.get_base_url()}/search/"
+        headers = self._get_headers() | {
+            'Content-Type': 'application/vnd.olrapi.dataview.dql+txt'
+        }
+
+        def call_fn():
+            response = requests.post(
+                url,
+                headers=headers,
+                data=query.encode('utf-8'),
+                verify=self.verify_ssl,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response.json()
+
+        return self._safe_call(call_fn)
+
     def get_recent_changes(self, limit: int = 10, days: int = 90) -> Any:
         """Get recently modified files in the vault.
         
