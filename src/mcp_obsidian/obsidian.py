@@ -77,7 +77,25 @@ class Obsidian():
             return response.text
 
         return self._safe_call(call_fn)
-    
+
+    def get_file_contents_raw(self, filepath: str) -> bytes:
+        """Get raw binary contents of a file in the vault.
+
+        Args:
+            filepath: Path to file relative to vault root
+
+        Returns:
+            Raw file bytes
+        """
+        url = f"{self.get_base_url()}/vault/{urllib.parse.quote(filepath, safe='/')}"
+
+        def call_fn():
+            response = requests.get(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            response.raise_for_status()
+            return response.content
+
+        return self._safe_call(call_fn)
+
     def get_batch_file_contents(self, filepaths: list[str]) -> str:
         """Get contents of multiple files and concatenate them with headers.
         
