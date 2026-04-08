@@ -2,7 +2,6 @@
 
 MCP server for Obsidian with a Zettelkasten knowledge base toolkit. Connects to Obsidian via the Local REST API plugin and provides 29 tools for automated note creation, decomposition, linking, and vault maintenance.
 
-#<a href="https://glama.ai/mcp/servers/3wko1bhuek"><img width="380" height="200" src="https://glama.ai/mcp/servers/3wko1bhuek/badge" alt="server for Obsidian MCP server" /></a>
 
 ## Tools
 
